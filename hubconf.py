@@ -9,7 +9,7 @@ sys.path.append(os.path.join(boq_root, "src"))
 
 import torch
 from backbones import ResNet, DinoV2
-from boq import BoQ
+from boqpp import BoQPlusPlus
 
     
 
@@ -54,12 +54,10 @@ def get_trained_boq(backbone_name="resnet50", output_dim=16384):
         # load the backbone
         backbone = DinoV2()
         # load the aggregator
-        aggregator = BoQ(
+        aggregator = BoQPlusPlus(
             in_channels=backbone.out_channels,  # make sure the backbone has out_channels attribute
             proj_channels=384,
-            num_queries=64,
-            num_layers=2,
-            row_dim=output_dim//384, # 32 for dinov2
+            num_layers=2
         )
         
     elif "resnet" in backbone_name:
@@ -67,12 +65,10 @@ def get_trained_boq(backbone_name="resnet50", output_dim=16384):
                 backbone_name=backbone_name,
                 crop_last_block=True,
             )
-        aggregator = BoQ(
+        aggregator = BoQPlusPlus(
                 in_channels=backbone.out_channels,  # make sure the backbone has out_channels attribute
                 proj_channels=512,
-                num_queries=64,
-                num_layers=2,
-                row_dim=output_dim//512, # 32 for resnet
+                num_layers=2
             )
 
     vpr_model = VPRModel(
