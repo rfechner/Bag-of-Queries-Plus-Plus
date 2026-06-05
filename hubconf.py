@@ -10,7 +10,8 @@ sys.path.append(os.path.join(boq_root, "src"))
 import torch
 from backbones import ResNet, DinoV2
 from boqpp import BoQPlusPlus
-from typing import Literal
+from typing import Literal, Dict
+
 class VPRModel(torch.nn.Module):
     def __init__(self, 
                  backbone,
@@ -19,7 +20,7 @@ class VPRModel(torch.nn.Module):
         self.backbone = backbone
         self.aggregator = aggregator
         
-    def forward(self, x, mode:Literal['train', 'test']):
+    def forward(self, x, mode:Literal['train', 'test', 'simultaneous']):
         x = self.backbone(x)
         x = self.aggregator(x, mode=mode)
         return x
@@ -38,7 +39,7 @@ MODEL_URLS = {
     # "resnet50_4096": "",
 }
 
-def get_trained_boq(backbone_name="resnet50", output_dim=16384, max_capacity=1000, n_layers=2):
+def _build_vpr_model(backbone_name, output_dim, aggregator_cls, **kwargs):
     if backbone_name not in AVAILABLE_BACKBONES:
         raise ValueError(f"backbone_name should be one of {list(AVAILABLE_BACKBONES.keys())}")
     try:
@@ -47,28 +48,26 @@ def get_trained_boq(backbone_name="resnet50", output_dim=16384, max_capacity=100
         raise ValueError(f"output_dim should be an integer, not a {type(output_dim)}")
     if output_dim not in AVAILABLE_BACKBONES[backbone_name]:
         raise ValueError(f"output_dim should be one of {AVAILABLE_BACKBONES[backbone_name]}")
-    
+
     if "dinov2" in backbone_name:
         # load the backbone
         backbone = DinoV2()
         # load the aggregator
-        aggregator = BoQPlusPlus(
+        aggregator = aggregator_cls(
             in_channels=backbone.out_channels,  # make sure the backbone has out_channels attribute
             proj_channels=384,
-            num_layers=n_layers,
-            max_capacity=max_capacity
+            **kwargs
         )
-        
+
     elif "resnet" in backbone_name:
         backbone = ResNet(
                 backbone_name=backbone_name,
                 crop_last_block=True,
             )
-        aggregator = BoQPlusPlus(
+        aggregator = aggregator_cls(
                 in_channels=backbone.out_channels,  # make sure the backbone has out_channels attribute
                 proj_channels=512,
-                num_layers=n_layers,
-                max_capacity=max_capacity
+                **kwargs
             )
 
     vpr_model = VPRModel(
@@ -81,18 +80,23 @@ def get_trained_boq(backbone_name="resnet50", output_dim=16384, max_capacity=100
         map_location=torch.device('cpu')
     )
 
-    # BoQPlusPlus reuses the BoQ backbone plus the aggregator's proj_c, norm_input
-    # and per-block transformer encoder. The query/cross-attn/fc params from BoQ
-    # are dropped, and BoQPlusPlus's memory buffers (M, M_index) are kept at init.
+    # Both aggregators reuse the BoQ backbone plus the aggregator's proj_c,
+    # norm_input and per-block transformer encoder. The BoQ-specific query /
+    # cross-attn / fc params are dropped, and the aggregator's own non-learnable
+    # state (SEER buffers / BoE banks) is left at init.
     own_state_dict = vpr_model.state_dict()
     reusable = {k: v for k, v in boq_state_dict.items()
                 if k in own_state_dict and own_state_dict[k].shape == v.shape}
     missing = set(own_state_dict) - set(reusable)
     dropped = set(boq_state_dict) - set(reusable)
-    print(f"[BoQPlusPlus] loaded {len(reusable)} tensors from BoQ checkpoint; "
+    print(f"[{aggregator_cls.__name__}] loaded {len(reusable)} tensors from BoQ checkpoint; "
           f"dropped {len(dropped)} unused BoQ params; "
-          f"{len(missing)} BoQPlusPlus params left at init.")
+          f"{len(missing)} {aggregator_cls.__name__} params left at init.")
 
     vpr_model.load_state_dict(reusable, strict=False)
 
     return vpr_model
+
+
+def get_trained_boq(backbone_name="resnet50", output_dim=16384, **kwargs):
+    return _build_vpr_model(backbone_name, output_dim, BoQPlusPlus, **kwargs)
