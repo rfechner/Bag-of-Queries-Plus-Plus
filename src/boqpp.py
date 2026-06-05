@@ -263,7 +263,9 @@ class BoQPlusPlusBlock_BF(nn.Module):
         lambda_: float = 2.0,
         max_capacity: int = 1000,
         similarity_threshold = 'auto',
-        sampling: str = 'proportional', **kwargs
+        sampling: str = 'proportional', 
+        use_out_proj : bool = False, 
+        **kwargs
     ):
         super().__init__(**kwargs)
         self.encoder = nn.TransformerEncoderLayer(
@@ -273,6 +275,7 @@ class BoQPlusPlusBlock_BF(nn.Module):
 
         # need to define here in order to load weights, not fully used.
         self.cross_attn = torch.nn.MultiheadAttention(in_dim, num_heads=nheads, batch_first=True)
+        self.use_out_proj = use_out_proj
 
         self.Mk, self.Mv = None, None # lazy initialized
         self.qproj, self.kproj, self.vproj = None, None, None
@@ -354,10 +357,14 @@ class BoQPlusPlusBlock_BF(nn.Module):
                 accu.append(out)
 
             # TODO: is summing correct here? This likely shifts the distribution center s.t. we cannot use an out_proj afterwards.
-            seer_repr = torch.stack(accu).sum(0) # [S, dv] -> [dv,]
+            seer_repr = torch.stack(accu).sum(0)
             outs.append(seer_repr)
 
         outs = torch.stack(outs) # [B, dv]
+
+        if self.use_out_proj:
+            outs = self.cross_attn.out_proj(outs) # [B, d_model]
+
         return outs
     
     def forward(self, x: torch.Tensor, mode: str):
@@ -404,7 +411,7 @@ class BoQPlusPlus(nn.Module):
         similarity_threshold: Union[float, str] = 'auto',
         sampling: str = 'proportional', **kwargs
     ):
-        super().__init__(**kwargs)
+        super().__init__()
         self.proj_c = nn.Conv2d(in_channels, proj_channels, kernel_size=3, padding=1)
         self.norm_input = nn.LayerNorm(proj_channels)
 
@@ -423,7 +430,7 @@ class BoQPlusPlus(nn.Module):
                 lambda_=lambda_,
                 max_capacity=max_capacity,
                 similarity_threshold=similarity_threshold,
-                sampling=sampling,
+                sampling=sampling, **kwargs
             )
             for _ in range(n_layers)
         ])
