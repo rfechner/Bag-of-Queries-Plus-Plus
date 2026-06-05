@@ -254,8 +254,6 @@ class BoQPlusPlusBlock(nn.Module):
         return x, out
 
 class BoQPlusPlusBlock_BF(nn.Module):
-    """TransformerEncoderLayer followed by a SEER exemplar bank."""
-
     def __init__(
         self,
         in_dim: int,
@@ -360,7 +358,6 @@ class BoQPlusPlusBlock_BF(nn.Module):
             outs.append(seer_repr)
 
         outs = torch.stack(outs) # [B, dv]
-        # outs = self.old_block.out_proj(outs) # [B, d_model] -> no residual signal to add onto.
         return outs
     
     def forward(self, x: torch.Tensor, mode: str):
