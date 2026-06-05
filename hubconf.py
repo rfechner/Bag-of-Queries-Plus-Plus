@@ -101,10 +101,23 @@ def _build_vpr_model(backbone_name, output_dim, aggregator_cls, **kwargs):
     return vpr_model
 
 
-def get_trained_boq(backbone_name="resnet50", output_dim=16384, device=None, **kwargs):
-    # device=None -> use CUDA when available, otherwise CPU. Pass an explicit
-    # device (e.g. "cpu" / "cuda" / torch.device(...)) to override.
+def resolve_device(device=None):
+    """Use CUDA whenever possible, fall back to CPU.
+
+    device=None  -> CUDA if available, else CPU.
+    explicit     -> honoured, but a CUDA request silently falls back to CPU
+                    when no GPU is present so the same call works everywhere.
+    """
     if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device(device)
+    if device.type == "cuda" and not torch.cuda.is_available():
+        print("[BoQ++] CUDA requested but not available; falling back to CPU.")
+        return torch.device("cpu")
+    return device
+
+
+def get_trained_boq(backbone_name="resnet50", output_dim=16384, device=None, **kwargs):
+    device = resolve_device(device)
     model = _build_vpr_model(backbone_name, output_dim, BoQPlusPlus, **kwargs)
     return model.to(device)
