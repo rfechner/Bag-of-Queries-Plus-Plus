@@ -21,6 +21,9 @@ class VPRModel(torch.nn.Module):
         self.aggregator = aggregator
         
     def forward(self, x, mode:Literal['train', 'test', 'simultaneous']):
+        # Make sure the input lives on the same device as the model's weights,
+        # so a CPU image can be fed to a GPU model (and vice-versa) seamlessly.
+        x = x.to(next(self.parameters()).device)
         x = self.backbone(x)
         x = self.aggregator(x, mode=mode)
         return x
@@ -98,5 +101,10 @@ def _build_vpr_model(backbone_name, output_dim, aggregator_cls, **kwargs):
     return vpr_model
 
 
-def get_trained_boq(backbone_name="resnet50", output_dim=16384, **kwargs):
-    return _build_vpr_model(backbone_name, output_dim, BoQPlusPlus, **kwargs)
+def get_trained_boq(backbone_name="resnet50", output_dim=16384, device=None, **kwargs):
+    # device=None -> use CUDA when available, otherwise CPU. Pass an explicit
+    # device (e.g. "cpu" / "cuda" / torch.device(...)) to override.
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = _build_vpr_model(backbone_name, output_dim, BoQPlusPlus, **kwargs)
+    return model.to(device)

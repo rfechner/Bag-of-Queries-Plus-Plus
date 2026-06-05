@@ -313,7 +313,9 @@ class BoQPlusPlusBlock_BF(nn.Module):
             # kk.shape [S, dk]
             for s, (k, v) in enumerate(zip(kk, vv)):
                 # how many KEY exemplars already in bank s match this key above threshold
-                n = 0 if len(self.Mk[s]) == 0 else int(((torch.stack(self.Mk[s]) @ k) > self.similarity_threshold).sum())
+                # Mk[s] is a plain list of tensors that does not move with .to();
+                # align it with the current key's device before matching.
+                n = 0 if len(self.Mk[s]) == 0 else int(((torch.stack(self.Mk[s]).to(k.device) @ k) > self.similarity_threshold).sum())
                 difference = self.k - n
                 if difference > 0:
                     # top up with `difference` new sparse candidates from this token
@@ -340,7 +342,10 @@ class BoQPlusPlusBlock_BF(nn.Module):
             # build SEER representations on the fly
             for s in range(len(self.Mk)): # iterate over spatial dimension
                 
-                Mks, Mvs = torch.stack(self.Mk[s]), torch.stack(self.Mv[s]) # shape [Lks, dk] and [Lks, dv]
+                # Banks are plain lists (not buffers), so pin them to the query's
+                # device to stay correct on CPU and GPU.
+                Mks = torch.stack(self.Mk[s]).to(q.device) # shape [Lks, dk]
+                Mvs = torch.stack(self.Mv[s]).to(q.device) # shape [Lks, dv]
 
                 """
                     Unlike in BoQ where we build a Nq \times S score matrix which relates Query i to every
@@ -427,6 +432,9 @@ class BoQPlusPlus(nn.Module):
         ])
 
     def forward(self, x: torch.Tensor, mode: str = 'test') -> Optional[torch.Tensor]:
+        # Follow the aggregator's own weights so the bank/buffers are built on
+        # the same device as the input, on CPU or GPU alike.
+        x = x.to(self.proj_c.weight.device)
         x = self.proj_c(x)
         x = x.flatten(2).permute(0, 2, 1)
         x = self.norm_input(x)
